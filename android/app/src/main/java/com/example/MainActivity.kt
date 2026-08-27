@@ -856,10 +856,10 @@ fun MainAppContent(viewModel: MainViewModel) {
         UploadDocsDialog(
             matterId = currentSelectedMatter!!.id,
             onDismiss = { showUploadDocsDialog = false },
-            onSubmit = { filename, docType, text ->
-                showUploadDocsDialog = false
-                viewModel.uploadDocument(currentSelectedMatter!!.id, filename, docType, text)
-            }
+            onUploadFile = { filename, mimeType, bytes ->
+                viewModel.uploadDocumentFile(currentSelectedMatter!!.id, filename, mimeType, bytes)
+            },
+            onAllDone = { viewModel.onDocumentsUploaded(currentSelectedMatter!!.id) }
         )
     }
 
@@ -909,9 +909,10 @@ fun MainAppContent(viewModel: MainViewModel) {
     if (showAddAuthorityDialog) {
         AddAuthorityDialog(
             onDismiss = { showAddAuthorityDialog = false },
-            onSubmit = { auth ->
+            onExtractText = { fileBase64, mimeType -> viewModel.extractLegalText(fileBase64, mimeType) },
+            onSubmit = { authTitle, authorityType, citation, effectiveDate, repealedDate, supersededBy, madhhab, sourceUrl, chunks ->
                 showAddAuthorityDialog = false
-                viewModel.addAuthority(auth)
+                viewModel.addAuthority(authTitle, authorityType, citation, effectiveDate, repealedDate, supersededBy, madhhab, sourceUrl, chunks)
             }
         )
     }

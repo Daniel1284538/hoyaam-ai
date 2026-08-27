@@ -343,6 +343,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun loadMatter(matterId: String) {
         _selectedMatterId.value = matterId
+        // Show this matter's own previously-generated analysis (if any)
+        // instead of leaving whichever matter was analyzed last on screen.
+        repository.syncCachedAnalysisFor(matterId)
         viewModelScope.launch {
             try {
                 val currentMatter = repository.matters.value.find { it.id == matterId }
@@ -639,14 +642,21 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun uploadDocument(matterId: String, filename: String, docType: String, text: String) {
-        viewModelScope.launch {
-            try {
-                repository.uploadDocument(matterId, filename, docType, text)
-                loadMatter(matterId)
-                refreshDashboard()
-            } catch (e: Exception) { emitError(e, "تعذّر رفع المستند") }
+    // One call per file — the dialog runs the batch itself (sequentially,
+    // one row at a time, matching the web app) so it can show live
+    // per-file progress and let one failure not block the rest.
+    suspend fun uploadDocumentFile(matterId: String, filename: String, mimeType: String, bytes: ByteArray): Result<Unit> {
+        return try {
+            repository.ingestAndUploadFile(matterId, filename, mimeType, bytes)
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
         }
+    }
+
+    fun onDocumentsUploaded(matterId: String) {
+        loadMatter(matterId)
+        refreshDashboard()
     }
 
     // Real function: sign-document-url — the only path to an actual
@@ -773,11 +783,46 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun addAuthority(authority: AuthorityDto) {
+    fun addAuthority(
+        title: String,
+        authorityType: String,
+        citation: String,
+        effectiveDate: String?,
+        repealedDate: String?,
+        supersededBy: String?,
+        madhhab: String?,
+        sourceUrl: String?,
+        chunks: List<Pair<String, String>>
+    ) {
         viewModelScope.launch {
             try {
-                repository.addAuthority(authority)
+                repository.addAuthority(
+                    title = title,
+                    authorityType = authorityType,
+                    citation = citation,
+                    effectiveDate = effectiveDate,
+                    repealedDate = repealedDate,
+                    madhhab = madhhab,
+                    sourceUrl = sourceUrl,
+                    chunks = chunks.map { (text, ref) -> buildMap {
+                        put("chunk_text", text)
+                        if (ref.isNotBlank()) put("chunk_ref", ref)
+                    } },
+                    supersededBy = supersededBy
+                )
             } catch (e: Exception) { emitError(e, "تعذّر إضافة المصدر القانوني") }
+        }
+    }
+
+    // Transcribes an uploaded scan (PDF/image) into starting draft text for
+    // the Add Legal Source dialog — same admin-ocr-legal-text call the web
+    // app uses. The dialog still requires a human to review/edit the text
+    // before saving; this only replaces a blank textarea.
+    suspend fun extractLegalText(fileBase64: String, mimeType: String): Result<String> {
+        return try {
+            Result.success(repository.ocrLegalText(fileBase64, mimeType))
+        } catch (e: Exception) {
+            Result.failure(e)
         }
     }
 

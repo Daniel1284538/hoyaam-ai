@@ -964,6 +964,18 @@ class LitigationRepository(
         return analysis
     }
 
+    // caseAnalysisCache was write-only before this — analyzeCase() filled
+    // it in, but nothing ever read it back, so _cachedCaseAnalysis (a
+    // single non-keyed value) just kept whatever the last-analyzed matter
+    // produced. Switching matters showed the wrong one's analysis, or none
+    // at all, even for a matter already analyzed this session — the only
+    // way to see it again was to hit "تحليل" and call Gemini again. Same
+    // fix as the web app's per-matter caseAnalysisCache Map: look this
+    // matter's entry up (or clear it) whenever the selected matter changes.
+    fun syncCachedAnalysisFor(matterId: String) {
+        _cachedCaseAnalysis.value = caseAnalysisCache[matterId]
+    }
+
     // ==================== HEARING BRIEFING ====================
     // Real function: litigation-hearing-briefing — never wired into the
     // app before. Persisted server-side as a drafts row, so no client
@@ -1099,7 +1111,8 @@ class LitigationRepository(
         repealedDate: String?,
         madhhab: String?,
         sourceUrl: String?,
-        chunks: List<Map<String, String>>
+        chunks: List<Map<String, String>>,
+        supersededBy: String? = null
     ): String {
         val token = requireToken()
         val json = JSONObject().apply {
@@ -1110,6 +1123,7 @@ class LitigationRepository(
             if (!repealedDate.isNullOrEmpty()) put("repealed_date", repealedDate)
             if (!madhhab.isNullOrEmpty()) put("madhhab", madhhab)
             if (!sourceUrl.isNullOrEmpty()) put("source_url", sourceUrl)
+            if (!supersededBy.isNullOrEmpty()) put("superseded_by", supersededBy)
             val chunksArr = JSONArray()
             for (c in chunks) {
                 chunksArr.put(JSONObject(c))
@@ -1120,6 +1134,20 @@ class LitigationRepository(
         val response = client.callEdgeFunction("litigation-manage-authority", json, token)
         refreshAll()
         return JSONObject(response).getString("authority_id")
+    }
+
+    // Pure transcription utility for the Add Legal Source dialog (mirrors
+    // the web app) — turns an uploaded scan into starting draft text a
+    // human still reviews before saving. Does not touch authorities/
+    // authority_chunks and does not persist the file anywhere.
+    suspend fun ocrLegalText(fileBase64: String, mimeType: String): String {
+        val token = requireToken()
+        val json = JSONObject().apply {
+            put("file_base64", fileBase64)
+            put("mime_type", mimeType)
+        }.toString()
+        val response = client.callEdgeFunction("admin-ocr-legal-text", json, token)
+        return JSONObject(response).optString("text", "")
     }
 
     suspend fun verifyAuthority(authorityId: String, decision: String = "verified", note: String? = null) {

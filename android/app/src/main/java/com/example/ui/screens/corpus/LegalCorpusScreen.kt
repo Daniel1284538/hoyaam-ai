@@ -27,11 +27,15 @@ import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.ArabicSansFontFamily
 import com.example.ui.theme.LocalHoyaamColors
 
+// Must match the DB check constraint (authorities_authority_type_check) —
+// "cassation_precedent" and "constitutional" here previously were not
+// valid values at all; the real column only allows these four, same as
+// the web app's AUTHORITY_TYPE_LABELS.
 val SOURCE_TYPE_LABELS = mapOf(
-    "cassation_precedent" to "حكم نقض",
-    "statute" to "نص قانوني",
-    "regulation" to "لائحة تنفيذية",
-    "constitutional" to "حكم دستوري"
+    "statute" to "تشريع",
+    "cassation_principle" to "مبدأ نقض",
+    "regulation" to "لائحة",
+    "fiqh_doctrine" to "فقه إسلامي"
 )
 
 @Composable

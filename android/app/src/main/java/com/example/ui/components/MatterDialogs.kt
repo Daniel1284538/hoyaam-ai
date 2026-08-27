@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +32,7 @@ import com.example.ui.screens.matters.STAGE_LABELS_MAP
 import com.example.ui.theme.AmiriFontFamily
 import com.example.ui.theme.ArabicSansFontFamily
 import com.example.ui.theme.LocalHoyaamColors
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -587,27 +589,65 @@ fun ProposeDeadlineDialog(
 
 // ==================== 6. UPLOAD DOCS DIALOG ====================
 
+// Real files now (PDF/image), matching the web app's upload dialog
+// exactly: pick multiple at once, upload+extract them one at a time
+// (legal-ingest -> storage -> legal-extract), each row tracking its own
+// stage independently so one failure doesn't block the rest of the batch.
+// The old version had no file picker at all — it only accepted a filename
+// typed by hand plus text pasted in manually, with a "document type" that
+// legal-ingest doesn't even have a field for.
+private data class UploadRow(
+    val uri: android.net.Uri,
+    val name: String,
+    val mimeType: String,
+    val stage: String? = null, // null|"uploading"|"extracting"|"done"|"failed"
+    val errorMsg: String? = null
+)
+
+private val FILE_STAGE_LABELS = mapOf(
+    "uploading" to "رفع",
+    "extracting" to "استخراج (Gemini)",
+    "done" to "تم",
+    "failed" to "فشل"
+)
+
 @Composable
 fun UploadDocsDialog(
     matterId: String,
     onDismiss: () -> Unit,
-    onSubmit: (filename: String, docType: String, contentText: String) -> Unit
+    onUploadFile: suspend (filename: String, mimeType: String, bytes: ByteArray) -> Result<Unit>,
+    onAllDone: () -> Unit
 ) {
     val colors = LocalHoyaamColors.current
-    var filename by remember { mutableStateOf("") }
-    var docType by remember { mutableStateOf("pleading") }
-    var contentText by remember { mutableStateOf("") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var rows by remember { mutableStateOf<List<UploadRow>>(emptyList()) }
+    var started by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
 
-    val docTypes = listOf(
-        "pleading" to "صحيفة دعوى / مذكرة",
-        "judgment" to "حكم قضائي",
-        "contract" to "عقد / اتفاقية",
-        "power_of_attorney" to "توكيل رسمي",
-        "notice" to "إنذار على يد محضر",
-        "other" to "مستند آخر"
-    )
+    fun resolveName(uri: android.net.Uri): String {
+        var name = uri.lastPathSegment ?: "file"
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx)?.let { name = it }
+        }
+        return name
+    }
 
-    Dialog(onDismissRequest = onDismiss) {
+    val pickFiles = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        rows = uris.map { uri ->
+            UploadRow(
+                uri = uri,
+                name = resolveName(uri),
+                mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            )
+        }
+    }
+
+    Dialog(onDismissRequest = { if (!busy) onDismiss() }) {
         Surface(
             shape = RoundedCornerShape(14.dp),
             color = colors.card,
@@ -615,48 +655,87 @@ fun UploadDocsDialog(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("إيداع ورفع مستند للقضية", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = AmiriFontFamily)
+                Text("رفع مستندات", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = AmiriFontFamily)
 
-                OutlinedTextField(
-                    value = filename,
-                    onValueChange = { filename = it },
-                    label = { Text("اسم الملف (مثال: صحيفة_الدعوى_المعلنة.pdf) *") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                error?.let { Text(it, color = colors.danger, fontSize = 13.sp) }
 
-                Column {
-                    Text("نوع المستند:", color = colors.textDim, fontSize = 12.sp)
-                    docTypes.forEach { (key, label) ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable { docType = key }
-                        ) {
-                            RadioButton(selected = docType == key, onClick = { docType = key })
-                            Text(label, color = colors.text, fontSize = 13.sp)
+                if (!started) {
+                    OutlinedButton(
+                        onClick = { pickFiles.launch(arrayOf("application/pdf", "image/*")) },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("اختيار الملفات (PDF أو صور) — يمكن اختيار عدة ملفات دفعة واحدة")
+                    }
+                }
+
+                if (rows.isNotEmpty()) {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        rows.forEach { row ->
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxWidth()
+                                    .background(colors.inset, RoundedCornerShape(8.dp))
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(row.name, color = colors.text, fontSize = 13.sp, maxLines = 1)
+                                    row.errorMsg?.let { Text(it, color = colors.danger, fontSize = 11.sp) }
+                                }
+                                if (!started) {
+                                    IconButton(onClick = { rows = rows.filter { it.uri != row.uri } }) {
+                                        Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = colors.textDim)
+                                    }
+                                } else {
+                                    val label = FILE_STAGE_LABELS[row.stage] ?: "قيد الانتظار"
+                                    Text(
+                                        label,
+                                        color = if (row.stage == "failed") colors.danger else if (row.stage == "done") colors.text else colors.textDim,
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
                     }
                 }
 
-                OutlinedTextField(
-                    value = contentText,
-                    onValueChange = { contentText = it },
-                    label = { Text("نص المستند المستخرج / الممسوح ضوئياً *") },
-                    placeholder = { Text("الصق النص هنا للمعالجة بالذكاء الاصطناعي...") },
-                    minLines = 4,
-                    maxLines = 8,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("إلغاء", color = colors.textDim) }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
-                        onClick = { onSubmit(filename, docType, contentText) },
-                        enabled = filename.isNotBlank() && contentText.isNotBlank(),
-                        colors = ButtonDefaults.buttonColors(containerColor = colors.text)
-                    ) {
-                        Text("رفع ومعالجة")
+                    TextButton(onClick = onDismiss, enabled = !busy) { Text(if (started) "إغلاق" else "إلغاء", color = colors.textDim) }
+                    if (!started) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                if (rows.isEmpty()) { error = "اختر ملفاً واحداً على الأقل"; return@Button }
+                                error = null
+                                started = true
+                                busy = true
+                                scope.launch {
+                                    for (row in rows) {
+                                        rows = rows.map { if (it.uri == row.uri) it.copy(stage = "uploading") else it }
+                                        try {
+                                            val bytes = context.contentResolver.openInputStream(row.uri)?.use { it.readBytes() }
+                                                ?: throw java.io.IOException("تعذّرت قراءة الملف")
+                                            rows = rows.map { if (it.uri == row.uri) it.copy(stage = "extracting") else it }
+                                            val result = onUploadFile(row.name, row.mimeType, bytes)
+                                            rows = rows.map {
+                                                if (it.uri != row.uri) it
+                                                else if (result.isSuccess) it.copy(stage = "done")
+                                                else it.copy(stage = "failed", errorMsg = result.exceptionOrNull()?.message ?: "فشل الرفع")
+                                            }
+                                        } catch (e: Exception) {
+                                            rows = rows.map { if (it.uri == row.uri) it.copy(stage = "failed", errorMsg = e.message) else it }
+                                        }
+                                    }
+                                    busy = false
+                                    onAllDone()
+                                }
+                            },
+                            enabled = rows.isNotEmpty(),
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.text)
+                        ) {
+                            Text("رفع")
+                        }
                     }
                 }
             }
@@ -986,18 +1065,100 @@ fun CitationInspectorDialog(
 
 // ==================== 10. ADD AUTHORITY DIALOG ====================
 
+// A chunk of source text, either extracted from an uploaded scan (OCR via
+// admin-ocr-legal-text) or typed in by hand — same two paths the web app
+// offers. At least one non-empty chunk is required before saving.
+private data class AuthorityChunk(
+    val localId: Int,
+    val source: String, // "file" | "manual"
+    val fileName: String? = null,
+    val chunkRef: String = "",
+    val chunkText: String = "",
+    val status: String = "done", // "uploading" | "done" | "failed"
+    val errorMsg: String? = null
+)
+
 @Composable
 fun AddAuthorityDialog(
     onDismiss: () -> Unit,
-    onSubmit: (AuthorityDto) -> Unit
+    onExtractText: suspend (fileBase64: String, mimeType: String) -> Result<String>,
+    onSubmit: (
+        title: String,
+        authorityType: String,
+        citation: String,
+        effectiveDate: String?,
+        repealedDate: String?,
+        supersededBy: String?,
+        madhhab: String?,
+        sourceUrl: String?,
+        chunks: List<Pair<String, String>>
+    ) -> Unit
 ) {
     val colors = LocalHoyaamColors.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+
     var title by remember { mutableStateOf("") }
     var citation by remember { mutableStateOf("") }
-    var sourceType by remember { mutableStateOf("cassation_precedent") }
+    var authorityType by remember { mutableStateOf("statute") }
     var madhhab by remember { mutableStateOf("") }
+    var sourceUrl by remember { mutableStateOf("") }
+    var effectiveDate by remember { mutableStateOf("") }
+    var repealedDate by remember { mutableStateOf("") }
+    var supersededBy by remember { mutableStateOf("") }
+    var manualText by remember { mutableStateOf("") }
+    var manualRef by remember { mutableStateOf("") }
+    var showRepealSection by remember { mutableStateOf(false) }
 
-    Dialog(onDismissRequest = onDismiss) {
+    var chunks by remember { mutableStateOf<List<AuthorityChunk>>(emptyList()) }
+    var chunkSeq by remember { mutableStateOf(0) }
+    var uploadBusy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val hasContent = chunks.any { it.chunkText.isNotBlank() }
+
+    fun resolveName(uri: android.net.Uri): String {
+        var name = uri.lastPathSegment ?: "file"
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+            if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx)?.let { name = it }
+        }
+        return name
+    }
+
+    val pickFiles = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isEmpty()) return@rememberLauncherForActivityResult
+        uploadBusy = true
+        val newRows = uris.map { uri ->
+            chunkSeq += 1
+            AuthorityChunk(localId = chunkSeq, source = "file", fileName = resolveName(uri), chunkRef = resolveName(uri), status = "uploading")
+                .let { it to uri }
+        }
+        chunks = chunks + newRows.map { it.first }
+        scope.launch {
+            for ((row, uri) in newRows) {
+                try {
+                    val bytes = context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                        ?: throw java.io.IOException("تعذّرت قراءة الملف")
+                    val mimeType = context.contentResolver.getType(uri) ?: "application/pdf"
+                    val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                    val result = onExtractText(base64, mimeType)
+                    chunks = chunks.map {
+                        if (it.localId != row.localId) it
+                        else if (result.isSuccess) it.copy(chunkText = result.getOrDefault(""), status = "done")
+                        else it.copy(status = "failed", errorMsg = result.exceptionOrNull()?.message)
+                    }
+                } catch (e: Exception) {
+                    chunks = chunks.map { if (it.localId == row.localId) it.copy(status = "failed", errorMsg = e.message) else it }
+                }
+            }
+            uploadBusy = false
+        }
+    }
+
+    Dialog(onDismissRequest = { if (!uploadBusy) onDismiss() }) {
         Surface(
             shape = RoundedCornerShape(14.dp),
             color = colors.card,
@@ -1005,64 +1166,184 @@ fun AddAuthorityDialog(
             modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp)
         ) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("إضافة مصدر / سند قانوني معتمد", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = AmiriFontFamily)
+                Text("إضافة مصدر قانوني", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = AmiriFontFamily)
+                Text(
+                    "النص يجب أن يكون نصاً قانونياً حقيقياً موثّقاً. يبقى المصدر \"غير موثّق\" حتى يراجعه شخص آخر غيرك.",
+                    color = colors.textDim, fontSize = 12.sp
+                )
+                error?.let { Text(it, color = colors.danger, fontSize = 13.sp) }
 
                 OutlinedTextField(
                     value = title,
                     onValueChange = { title = it },
-                    label = { Text("عنوان المبدأ أو السند *") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                OutlinedTextField(
-                    value = citation,
-                    onValueChange = { citation = it },
-                    label = { Text("بيانات الاستشهاد (مثال: الطعن 1245 لسنة 85 ق) *") },
+                    label = { Text("العنوان *") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
                 Column {
-                    Text("نوع المصدر:", color = colors.textDim, fontSize = 12.sp)
+                    Text("النوع:", color = colors.textDim, fontSize = 12.sp)
                     SOURCE_TYPE_LABELS.forEach { (key, label) ->
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth().clickable { sourceType = key }
+                            modifier = Modifier.fillMaxWidth().clickable { authorityType = key }
                         ) {
-                            RadioButton(selected = sourceType == key, onClick = { sourceType = key })
+                            RadioButton(selected = authorityType == key, onClick = { authorityType = key })
                             Text(label, color = colors.text, fontSize = 13.sp)
                         }
                     }
                 }
 
+                if (authorityType == "fiqh_doctrine") {
+                    OutlinedTextField(
+                        value = madhhab,
+                        onValueChange = { madhhab = it },
+                        label = { Text("المذهب *") },
+                        placeholder = { Text("hanafi / maliki / shafii / hanbali") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 OutlinedTextField(
-                    value = madhhab,
-                    onValueChange = { madhhab = it },
-                    label = { Text("الفرع / الدائرة (اختياري)") },
+                    value = citation,
+                    onValueChange = { citation = it },
+                    label = { Text("الاستشهاد * (مثال: قانون المرافعات، م. 123)") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
 
+                OutlinedTextField(
+                    value = effectiveDate,
+                    onValueChange = { effectiveDate = it },
+                    label = { Text("تاريخ النفاذ (YYYY-MM-DD)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = sourceUrl,
+                    onValueChange = { sourceUrl = it },
+                    label = { Text("رابط المصدر (اختياري)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                // ---- upload / manual text, same two paths as the web dialog ----
+                Text("النص * — ارفع ملفات (PDF أو صور، عدة ملفات دفعة واحدة) أو أضف نصاً يدوياً", color = colors.textDim, fontSize = 12.sp)
+                OutlinedButton(
+                    onClick = { pickFiles.launch(arrayOf("application/pdf", "image/*")) },
+                    enabled = !uploadBusy,
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("اختيار ملفات") }
+                if (uploadBusy) Text("جارٍ استخراج النص من الملفات…", color = colors.textDim, fontSize = 12.sp)
+
+                chunks.forEach { c ->
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .background(colors.inset, RoundedCornerShape(8.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                            Text(c.fileName ?: "نص يدوي", color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                            if (c.status == "uploading") Text("جارٍ الاستخراج…", color = colors.textDim, fontSize = 11.sp)
+                            if (c.status == "failed") Text("فشل الاستخراج", color = colors.danger, fontSize = 11.sp)
+                            IconButton(onClick = { chunks = chunks.filter { it.localId != c.localId } }, enabled = !uploadBusy) {
+                                Icon(Icons.Filled.Close, contentDescription = "إزالة", tint = colors.textDim)
+                            }
+                        }
+                        c.errorMsg?.let { Text(it, color = colors.danger, fontSize = 11.sp) }
+                        OutlinedTextField(
+                            value = c.chunkRef,
+                            onValueChange = { v -> chunks = chunks.map { if (it.localId == c.localId) it.copy(chunkRef = v) else it } },
+                            label = { Text("إشارة الفقرة/المادة") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        OutlinedTextField(
+                            value = c.chunkText,
+                            onValueChange = { v -> chunks = chunks.map { if (it.localId == c.localId) it.copy(chunkText = v) else it } },
+                            label = { Text("النص (قابل للتحقق والتعديل قبل الحفظ)") },
+                            minLines = 4,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                }
+
+                Column {
+                    Text("أضف نصاً يدوياً", color = colors.textDim, fontSize = 12.sp)
+                    OutlinedTextField(
+                        value = manualText,
+                        onValueChange = { manualText = it },
+                        minLines = 3,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = manualRef,
+                            onValueChange = { manualRef = it },
+                            label = { Text("إشارة الفقرة/المادة (اختياري)") },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Button(
+                            onClick = {
+                                if (manualText.isBlank()) return@Button
+                                chunkSeq += 1
+                                chunks = chunks + AuthorityChunk(localId = chunkSeq, source = "manual", chunkRef = manualRef.trim(), chunkText = manualText.trim())
+                                manualText = ""; manualRef = ""
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = colors.text)
+                        ) { Text("+ إضافة") }
+                    }
+                }
+
+                TextButton(onClick = { showRepealSection = !showRepealSection }) {
+                    Text("ملغى بالفعل؟ (اختياري)", color = colors.textDim, fontSize = 12.sp)
+                }
+                if (showRepealSection) {
+                    OutlinedTextField(
+                        value = repealedDate,
+                        onValueChange = { repealedDate = it },
+                        label = { Text("تاريخ الإلغاء (YYYY-MM-DD)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = supersededBy,
+                        onValueChange = { supersededBy = it },
+                        label = { Text("حل محله (UUID)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = onDismiss) { Text("إلغاء", color = colors.textDim) }
+                    TextButton(onClick = onDismiss, enabled = !uploadBusy) { Text("إلغاء", color = colors.textDim) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            val auth = AuthorityDto(
-                                id = UUID.randomUUID().toString(),
-                                title = title,
-                                citation = citation,
-                                authorityType = sourceType,
-                                madhhab = madhhab.ifBlank { null },
-                                verificationStatus = "verified"
+                            error = null
+                            if (title.isBlank() || citation.isBlank()) { error = "العنوان والاستشهاد مطلوبان"; return@Button }
+                            if (!hasContent) { error = "أضف نصاً واحداً على الأقل — ارفع ملفاً أو اكتب نصاً يدوياً"; return@Button }
+                            if (authorityType == "fiqh_doctrine" && madhhab.isBlank()) { error = "المذهب مطلوب للمصادر الفقهية"; return@Button }
+                            onSubmit(
+                                title,
+                                authorityType,
+                                citation,
+                                effectiveDate.ifBlank { null },
+                                repealedDate.ifBlank { null },
+                                supersededBy.ifBlank { null },
+                                madhhab.ifBlank { null },
+                                sourceUrl.ifBlank { null },
+                                chunks.filter { it.chunkText.isNotBlank() }.map { it.chunkText.trim() to it.chunkRef.trim() }
                             )
-                            onSubmit(auth)
                         },
-                        enabled = title.isNotBlank() && citation.isNotBlank(),
+                        enabled = !uploadBusy && title.isNotBlank() && citation.isNotBlank() && hasContent,
                         colors = ButtonDefaults.buttonColors(containerColor = colors.text)
                     ) {
-                        Text("إضافة وتوثيق")
+                        Text("حفظ")
                     }
                 }
             }
