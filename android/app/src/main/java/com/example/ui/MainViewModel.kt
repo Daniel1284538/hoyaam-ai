@@ -49,6 +49,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _errorEvents.emit(e.message?.takeIf { it.isNotBlank() } ?: fallback)
     }
 
+    // Backs the pull-to-refresh gesture on every tab — refreshDashboard()
+    // already refreshes everything (matters/alerts/authorities/templates/
+    // extractions via repository.refreshAll(), plus dashboard stats and the
+    // roll), so one shared flag and one shared action covers all of them.
+    private val _isRefreshing = MutableStateFlow(false)
+    val isRefreshing: StateFlow<Boolean> = _isRefreshing.asStateFlow()
+
     val authState: StateFlow<AuthState> = repository.authState
     val matters: StateFlow<List<MatterDto>> = repository.matters
     val urgentAlerts: StateFlow<List<UrgentAlert>> = repository.urgentAlerts
@@ -287,6 +294,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refreshDashboard() {
         viewModelScope.launch {
+            _isRefreshing.value = true
             try {
                 _dashboardStats.value = repository.getDashboardStats()
                 loadRollForDate(_selectedRollDate.value)
@@ -308,7 +316,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         tags = if (m.status == "archived") "Archived" else "Active, Court Filing"
                     )
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                // Was silently swallowed before — a failure here left every
+                // list (matters included) stuck empty with no way to tell
+                // why. Surface it like every other mutation in this class does.
+                emitError(e, "تعذّر تحديث البيانات")
+            } finally {
+                _isRefreshing.value = false
+            }
         }
     }
 

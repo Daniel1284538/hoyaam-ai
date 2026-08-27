@@ -292,6 +292,18 @@ class LitigationRepository(
 
     suspend fun getDashboardStats(): DashboardStatsData {
         val token = requireToken()
+
+        // Run this first, not last: on a restored session (app relaunch with
+        // an already-persisted aal2 session), this call chain is the only
+        // thing that ever populates matters/urgentAlerts/authorities/
+        // templates/pendingExtractions. It used to sit at the end of this
+        // function — if any one of the dashboard-specific queries below
+        // threw, refreshAll() never ran and every one of those lists stayed
+        // empty forever, with the exception silently swallowed by this
+        // function's caller. Doing it first means a dashboard-stats failure
+        // can no longer block the rest of the app's data from loading.
+        refreshAll()
+
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
         val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, 7) }
         val nextWeek = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
@@ -331,8 +343,6 @@ class LitigationRepository(
             token,
             DeadlineDto::class.java
         )
-
-        refreshAll()
 
         return DashboardStatsData(
             todayHearingsCount = todayHearings.size,

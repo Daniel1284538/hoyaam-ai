@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -202,6 +203,8 @@ fun MainAppContent(viewModel: MainViewModel) {
     val templates by viewModel.templates.collectAsStateWithLifecycle()
     val pendingExtractions by viewModel.pendingExtractions.collectAsStateWithLifecycle()
     val stats by viewModel.dashboardStats.collectAsStateWithLifecycle()
+    // Backs the pull-to-refresh gesture on every tab below.
+    val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
 
     val currentNavBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = currentNavBackStackEntry?.destination?.route
@@ -391,33 +394,37 @@ fun MainAppContent(viewModel: MainViewModel) {
                 startDestination = Screen.Dashboard.route
             ) {
                 composable(Screen.Dashboard.route) {
-                    DashboardScreen(
-                        stats = stats,
-                        isLoading = false,
-                        onNavigateToRoll = { navController.navigate(Screen.Roll.route) },
-                        onNavigateToDeadlines = { navController.navigate(Screen.Deadlines.route) },
-                        onNavigateToReview = { navController.navigate(Screen.Review.route) },
-                        onNavigateToTemplates = { navController.navigate(Screen.Templates.route) },
-                        onNavigateToMatter = { matterId ->
-                            viewModel.loadMatter(matterId)
-                            navController.navigate("matter_detail/$matterId")
-                        },
-                        onConfirmDeadline = { deadlineId ->
-                            viewModel.confirmDeadline(deadlineId)
-                        }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        DashboardScreen(
+                            stats = stats,
+                            isLoading = false,
+                            onNavigateToRoll = { navController.navigate(Screen.Roll.route) },
+                            onNavigateToDeadlines = { navController.navigate(Screen.Deadlines.route) },
+                            onNavigateToReview = { navController.navigate(Screen.Review.route) },
+                            onNavigateToTemplates = { navController.navigate(Screen.Templates.route) },
+                            onNavigateToMatter = { matterId ->
+                                viewModel.loadMatter(matterId)
+                                navController.navigate("matter_detail/$matterId")
+                            },
+                            onConfirmDeadline = { deadlineId ->
+                                viewModel.confirmDeadline(deadlineId)
+                            }
+                        )
+                    }
                 }
 
                 composable(Screen.Matters.route) {
-                    MattersListScreen(
-                        matters = matters,
-                        isLoading = false,
-                        onMatterClick = { matterId ->
-                            viewModel.loadMatter(matterId)
-                            navController.navigate("matter_detail/$matterId")
-                        },
-                        onOpenNewMatterDialog = { showNewMatterDialog = true }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        MattersListScreen(
+                            matters = matters,
+                            isLoading = false,
+                            onMatterClick = { matterId ->
+                                viewModel.loadMatter(matterId)
+                                navController.navigate("matter_detail/$matterId")
+                            },
+                            onOpenNewMatterDialog = { showNewMatterDialog = true }
+                        )
+                    }
                 }
 
                 composable(
@@ -568,52 +575,60 @@ fun MainAppContent(viewModel: MainViewModel) {
                     val dayHearings by viewModel.dayHearings.collectAsStateWithLifecycle()
                     val monthHearingDates by viewModel.monthHearingDates.collectAsStateWithLifecycle()
 
-                    HearingRollScreen(
-                        dayHearings = dayHearings,
-                        monthHearingDates = monthHearingDates,
-                        selectedDate = selectedDate,
-                        onSelectDate = { date -> viewModel.selectRollDate(date) },
-                        onNavigateToMatter = { matterId ->
-                            viewModel.loadMatter(matterId)
-                            navController.navigate("matter_detail/$matterId")
-                        }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        HearingRollScreen(
+                            dayHearings = dayHearings,
+                            monthHearingDates = monthHearingDates,
+                            selectedDate = selectedDate,
+                            onSelectDate = { date -> viewModel.selectRollDate(date) },
+                            onNavigateToMatter = { matterId ->
+                                viewModel.loadMatter(matterId)
+                                navController.navigate("matter_detail/$matterId")
+                            }
+                        )
+                    }
                 }
 
                 composable(Screen.Deadlines.route) {
                     val topDeadlines = stats.topProvisionalDeadlines
 
-                    DeadlinesListScreen(
-                        deadlines = topDeadlines,
-                        isLoading = false,
-                        onConfirmDeadline = { deadlineId -> viewModel.confirmDeadline(deadlineId) },
-                        onNavigateToMatter = { matterId ->
-                            viewModel.loadMatter(matterId)
-                            navController.navigate("matter_detail/$matterId")
-                        }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        DeadlinesListScreen(
+                            deadlines = topDeadlines,
+                            isLoading = false,
+                            onConfirmDeadline = { deadlineId -> viewModel.confirmDeadline(deadlineId) },
+                            onNavigateToMatter = { matterId ->
+                                viewModel.loadMatter(matterId)
+                                navController.navigate("matter_detail/$matterId")
+                            }
+                        )
+                    }
                 }
 
                 composable(Screen.Review.route) {
-                    ReviewQueueScreen(
-                        extractions = pendingExtractions,
-                        isLoading = false,
-                        onReviewExtraction = { id, action, corrected ->
-                            viewModel.reviewExtraction(id, action, corrected)
-                        }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        ReviewQueueScreen(
+                            extractions = pendingExtractions,
+                            isLoading = false,
+                            onReviewExtraction = { id, action, corrected ->
+                                viewModel.reviewExtraction(id, action, corrected)
+                            }
+                        )
+                    }
                 }
 
                 composable(Screen.Research.route) {
                     val isSearching by viewModel.isSearchingResearch.collectAsStateWithLifecycle()
                     val researchResult by viewModel.researchResult.collectAsStateWithLifecycle()
 
-                    ResearchScreen(
-                        onSearch = { q -> viewModel.performResearch(q) },
-                        isSearching = isSearching,
-                        researchResult = researchResult,
-                        onNavigateToCorpus = { navController.navigate(Screen.Corpus.route) }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        ResearchScreen(
+                            onSearch = { q -> viewModel.performResearch(q) },
+                            isSearching = isSearching,
+                            researchResult = researchResult,
+                            onNavigateToCorpus = { navController.navigate(Screen.Corpus.route) }
+                        )
+                    }
                 }
 
                 composable(Screen.Archive.route) {
@@ -624,38 +639,44 @@ fun MainAppContent(viewModel: MainViewModel) {
                     val archiveSearchResult by viewModel.archiveSearchResult.collectAsStateWithLifecycle()
                     val isSearchingArchive by viewModel.isSearchingArchive.collectAsStateWithLifecycle()
 
-                    ArchiveSearchScreen(
-                        allMatters = matters,
-                        localSearchQuery = localSearchQuery,
-                        searchSummaries = searchSummaries,
-                        searchNotes = searchNotes,
-                        searchScans = searchScans,
-                        onSearchQueryChange = { q -> viewModel.setLocalSearchQuery(q) },
-                        onNavigateToMatter = { matterId ->
-                            viewModel.loadMatter(matterId)
-                            navController.navigate("matter_detail/$matterId")
-                        },
-                        archiveSearchResult = archiveSearchResult,
-                        isSearchingArchive = isSearchingArchive,
-                        onSearchArchiveRemote = { q -> viewModel.searchArchiveRemote(q) }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        ArchiveSearchScreen(
+                            allMatters = matters,
+                            localSearchQuery = localSearchQuery,
+                            searchSummaries = searchSummaries,
+                            searchNotes = searchNotes,
+                            searchScans = searchScans,
+                            onSearchQueryChange = { q -> viewModel.setLocalSearchQuery(q) },
+                            onNavigateToMatter = { matterId ->
+                                viewModel.loadMatter(matterId)
+                                navController.navigate("matter_detail/$matterId")
+                            },
+                            archiveSearchResult = archiveSearchResult,
+                            isSearchingArchive = isSearchingArchive,
+                            onSearchArchiveRemote = { q -> viewModel.searchArchiveRemote(q) }
+                        )
+                    }
                 }
 
                 composable(Screen.Corpus.route) {
-                    LegalCorpusScreen(
-                        authorities = authorities,
-                        isLoading = false,
-                        onOpenAddAuthorityDialog = { showAddAuthorityDialog = true },
-                        onVerifyAuthority = { id -> viewModel.verifyAuthority(id) }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        LegalCorpusScreen(
+                            authorities = authorities,
+                            isLoading = false,
+                            onOpenAddAuthorityDialog = { showAddAuthorityDialog = true },
+                            onVerifyAuthority = { id -> viewModel.verifyAuthority(id) }
+                        )
+                    }
                 }
 
                 composable(Screen.Templates.route) {
-                    TemplatesScreen(
-                        templates = templates,
-                        isLoading = false,
-                        onOpenAddTemplateDialog = { showAddTemplateDialog = true }
-                    )
+                    PullToRefreshBox(isRefreshing = isRefreshing, onRefresh = { viewModel.refreshDashboard() }) {
+                        TemplatesScreen(
+                            templates = templates,
+                            isLoading = false,
+                            onOpenAddTemplateDialog = { showAddTemplateDialog = true }
+                        )
+                    }
                 }
             }
         }
