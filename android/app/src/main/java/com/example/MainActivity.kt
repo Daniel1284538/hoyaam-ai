@@ -796,11 +796,24 @@ fun MainAppContent(viewModel: MainViewModel) {
     if (showNewMatterDialog) {
         NewMatterDialog(
             onDismiss = { showNewMatterDialog = false },
-            onSubmit = { newMatter ->
+            onSubmit = { newMatter, subjectPendingDocuments ->
                 showNewMatterDialog = false
-                viewModel.createMatter(newMatter)
+                viewModel.createMatter(newMatter, subjectPendingDocuments)
             }
         )
+    }
+
+    // Same as the web app: navigate into the new matter's own page right
+    // after creation (rather than leaving the user on the list to find it
+    // themselves), and open the upload dialog too if they chose "upload
+    // documents instead" of typing a subject.
+    val createdMatterEvent by viewModel.createdMatterEvent.collectAsStateWithLifecycle()
+    LaunchedEffect(createdMatterEvent) {
+        createdMatterEvent?.let { (matterId, openUpload) ->
+            navController.navigate("matter_detail/$matterId")
+            if (openUpload) showUploadDocsDialog = true
+            viewModel.clearCreatedMatterEvent()
+        }
     }
 
     val currentSelectedMatter by viewModel.selectedMatter.collectAsStateWithLifecycle()

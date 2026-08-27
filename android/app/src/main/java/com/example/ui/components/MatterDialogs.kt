@@ -41,7 +41,7 @@ import java.util.*
 @Composable
 fun NewMatterDialog(
     onDismiss: () -> Unit,
-    onSubmit: (MatterDto) -> Unit
+    onSubmit: (matter: MatterDto, subjectPendingDocuments: Boolean) -> Unit
 ) {
     val colors = LocalHoyaamColors.current
     var label by remember { mutableStateOf("") }
@@ -52,6 +52,11 @@ fun NewMatterDialog(
     var matterType by remember { mutableStateOf("") }
     var stage by remember { mutableStateOf("first_instance") }
     var subject by remember { mutableStateOf("") }
+    // "documents" mode leaves the subject unset and opens the upload
+    // dialog immediately after creation instead — same choice the web
+    // app offers, so a lawyer isn't forced to type a subject by hand
+    // before they can attach the case's own scanned documents.
+    var subjectPendingDocuments by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -134,14 +139,35 @@ fun NewMatterDialog(
                     }
                 }
 
-                OutlinedTextField(
-                    value = subject,
-                    onValueChange = { subject = it },
-                    label = { Text("موضوع القضية والوقائع *") },
-                    minLines = 3,
-                    maxLines = 5,
-                    modifier = Modifier.fillMaxWidth().testTag("matter_subject_input")
-                )
+                Column {
+                    Text("موضوع القضية والوقائع *", color = colors.textDim, fontSize = 12.sp)
+                    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        FilterChip(
+                            selected = !subjectPendingDocuments,
+                            onClick = { subjectPendingDocuments = false },
+                            label = { Text("نص حر", fontSize = 12.sp) }
+                        )
+                        FilterChip(
+                            selected = subjectPendingDocuments,
+                            onClick = { subjectPendingDocuments = true },
+                            label = { Text("رفع مستندات بدلاً من ذلك", fontSize = 12.sp) }
+                        )
+                    }
+                    if (!subjectPendingDocuments) {
+                        OutlinedTextField(
+                            value = subject,
+                            onValueChange = { subject = it },
+                            minLines = 3,
+                            maxLines = 5,
+                            modifier = Modifier.fillMaxWidth().testTag("matter_subject_input")
+                        )
+                    } else {
+                        Text(
+                            "ستُنشأ القضية بلا موضوع نصي، وستُفتح نافذة رفع المستندات (عدة ملفات دفعة واحدة) مباشرة بعد الإنشاء — يمكن كتابة الموضوع يدوياً لاحقاً من تبويب \"نظرة عامة\".",
+                            color = colors.textDim, fontSize = 12.sp
+                        )
+                    }
+                }
 
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onDismiss) { Text("إلغاء", color = colors.textDim) }
@@ -158,19 +184,21 @@ fun NewMatterDialog(
                                 matterType = matterType.ifBlank { null },
                                 stage = stage,
                                 status = "active",
-                                subject = subject.ifBlank { null }
+                                subject = if (subjectPendingDocuments) null else subject.ifBlank { null }
                             )
-                            onSubmit(matter)
+                            onSubmit(matter, subjectPendingDocuments)
                         },
                         // All of these are genuinely required server-side
                         // (litigation-create-matter rejects the request
                         // otherwise) — enforcing that here means a missing
                         // field is caught before a call is even made,
                         // rather than only surfacing as a Snackbar error
-                        // after a round trip.
+                        // after a round trip. subject is the one exception:
+                        // required only in free-text mode, matching
+                        // subject_pending_documents server-side.
                         enabled = label.isNotBlank() && court.isNotBlank() && circuit.isNotBlank() &&
                             caseNumber.isNotBlank() && caseYear.toIntOrNull() != null &&
-                            matterType.isNotBlank() && subject.isNotBlank(),
+                            matterType.isNotBlank() && (subjectPendingDocuments || subject.isNotBlank()),
                         colors = ButtonDefaults.buttonColors(containerColor = colors.text),
                         modifier = Modifier.testTag("submit_new_matter_btn")
                     ) {

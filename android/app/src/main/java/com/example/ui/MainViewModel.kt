@@ -552,11 +552,33 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun createMatter(matter: MatterDto) {
+    // One-shot: MainActivity navigates into the new matter's own page on
+    // this firing (matching the web app, which does the same regardless
+    // of subjectMode), and opens the upload dialog too when the second
+    // value is true — same gap as the "no upload option" bug: creating a
+    // matter previously just closed the dialog and left the user to find
+    // their new matter in the list and the Documents tab themselves.
+    private val _createdMatterEvent = MutableStateFlow<Pair<String, Boolean>?>(null)
+    val createdMatterEvent: StateFlow<Pair<String, Boolean>?> = _createdMatterEvent.asStateFlow()
+    fun clearCreatedMatterEvent() { _createdMatterEvent.value = null }
+
+    fun createMatter(matter: MatterDto, subjectPendingDocuments: Boolean = false) {
         viewModelScope.launch {
             try {
-                repository.createMatter(matter)
+                val matterId = repository.createMatter(
+                    matterLabel = matter.matterLabel,
+                    court = matter.court,
+                    circuit = matter.circuit,
+                    caseNumber = matter.caseNumber,
+                    caseYear = matter.caseYear,
+                    matterType = matter.matterType,
+                    stage = matter.stage,
+                    subject = matter.subject,
+                    subjectPendingDocuments = subjectPendingDocuments
+                )
                 refreshDashboard()
+                loadMatter(matterId)
+                _createdMatterEvent.value = matterId to subjectPendingDocuments
             } catch (e: Exception) { emitError(e, "تعذّر إنشاء القضية") }
         }
     }

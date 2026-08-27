@@ -317,25 +317,25 @@ class LitigationRepository(
         val weekHearings = client.queryRestList(
             "hearings?session_date=gte.$today&session_date=lte.$nextWeek&select=id",
             token,
-            HearingDto::class.java
+            IdOnlyDto::class.java
         )
 
         val overdueDeadlines = client.queryRestList(
             "deadlines?status=in.(provisional,confirmed)&computed_due_date=lt.$today&select=id",
             token,
-            DeadlineDto::class.java
+            IdOnlyDto::class.java
         )
 
         val pendingExtractions = client.queryRestList(
             "extractions?review_status=eq.pending&select=id",
             token,
-            ExtractionDto::class.java
+            IdOnlyDto::class.java
         )
 
         val activeTemplates = client.queryRestList(
             "templates?active=eq.true&select=id",
             token,
-            TemplateDto::class.java
+            IdOnlyDto::class.java
         )
 
         val topProvisionalDeadlines = client.queryRestList(
@@ -458,7 +458,8 @@ class LitigationRepository(
         caseYear: Int?,
         matterType: String?,
         stage: String?,
-        subject: String?
+        subject: String?,
+        subjectPendingDocuments: Boolean = false
     ): String {
         val token = requireToken()
         // Real function: litigation-create-matter. Every one of these
@@ -467,7 +468,11 @@ class LitigationRepository(
         // case_number/case_year/matter_type/stage/subject must all be
         // real, non-empty values, or the call is rejected with a specific
         // "<field> is required" error. No {action: "create"} wrapper —
-        // the fields go directly in the body.
+        // the fields go directly in the body. subject_pending_documents
+        // is the one escape hatch — skips the subject-required check
+        // server-side, matching the web app's "upload documents instead"
+        // toggle, so a lawyer can create the matter and attach scans
+        // right away instead of typing a subject by hand up front.
         val json = JSONObject().apply {
             put("matter_label", matterLabel)
             put("court", court.orEmpty())
@@ -477,6 +482,7 @@ class LitigationRepository(
             put("matter_type", matterType.orEmpty())
             put("stage", stage.orEmpty())
             put("subject", subject.orEmpty())
+            if (subjectPendingDocuments) put("subject_pending_documents", true)
         }.toString()
 
         val response = client.callEdgeFunction("litigation-create-matter", json, token)

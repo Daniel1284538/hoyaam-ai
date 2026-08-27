@@ -121,6 +121,16 @@ data class PartyDto(
     @Json(name = "created_at") val createdAt: String? = null
 )
 
+// For count-only REST queries (select=id) against tables whose full DTO
+// requires other non-null fields (matter_id, trigger_event, etc.) — those
+// tried to parse an id-only response into the full DTO and threw
+// "Required value ... missing at $[0]" on every pull-to-refresh, silently
+// before, visibly once refreshDashboard() started surfacing errors.
+@JsonClass(generateAdapter = true)
+data class IdOnlyDto(
+    @Json(name = "id") val id: String
+)
+
 // ==================== HEARINGS ====================
 
 @JsonClass(generateAdapter = true)
