@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,12 +21,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.R
 import com.example.data.model.AlertType
 import com.example.data.model.UrgentAlert
 import com.example.ui.theme.AmiriFontFamily
@@ -68,22 +72,18 @@ fun AppTopBar(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f, fill = false)
             ) {
-                // Sleek circular avatar in warm olive-bronze with white text
-                Box(
+                // هويام mascot as the profile avatar — same illustration used
+                // on the auth screens (mascot_hoyaam), replacing the "هـ"
+                // initial badge placeholder.
+                Image(
+                    painter = painterResource(id = R.drawable.mascot_hoyaam),
+                    contentDescription = "هويام",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(colors.accent),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "هـ",
-                        color = Color.White,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = AmiriFontFamily
-                    )
-                }
+                        .background(colors.accent)
+                )
 
                 Spacer(modifier = Modifier.width(12.dp))
 
