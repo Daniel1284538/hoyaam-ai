@@ -70,8 +70,12 @@ class SupabaseClient {
             ?: throw IOException("Failed to parse auth response")
     }
 
+    // GoTrue has no GET /factors endpoint — that path only accepts POST
+    // (enroll), so calling it with GET returns 405. The real SDKs derive
+    // listFactors() from the `factors` array on GET /auth/v1/user instead;
+    // mirror that here.
     suspend fun listFactors(accessToken: String): FactorListResponse = withContext(Dispatchers.IO) {
-        val url = "${SupabaseConfig.PROJECT_URL}/auth/v1/factors"
+        val url = "${SupabaseConfig.PROJECT_URL}/auth/v1/user"
         val request = Request.Builder()
             .url(url)
             .addHeader("apikey", SupabaseConfig.ANON_KEY)
@@ -85,15 +89,12 @@ class SupabaseClient {
             throw IOException("Failed to list factors: ${response.code} $responseBody")
         }
 
-        // Response is either {"all": [...], "totp": [...]} or a list
-        try {
-            moshi.adapter(FactorListResponse::class.java).fromJson(responseBody)
-                ?: FactorListResponse()
-        } catch (e: Exception) {
-            val listType = Types.newParameterizedType(List::class.java, FactorDto::class.java)
-            val factors = moshi.adapter<List<FactorDto>>(listType).fromJson(responseBody) ?: emptyList()
-            FactorListResponse(all = factors, totp = factors.filter { it.factorType == "totp" })
-        }
+        val user = moshi.adapter(UserDto::class.java).fromJson(responseBody)
+        val factors = user?.factors ?: emptyList()
+        FactorListResponse(
+            all = factors,
+            totp = factors.filter { it.factorType == "totp" && it.status == "verified" }
+        )
     }
 
     suspend fun enrollTotp(accessToken: String): FactorDto = withContext(Dispatchers.IO) {
