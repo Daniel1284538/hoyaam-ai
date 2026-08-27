@@ -124,6 +124,20 @@ class LitigationRepository(
         val userId = authResp.user?.id ?: throw IllegalStateException("User ID missing in response")
         val userEmail = authResp.user.email ?: email
 
+        // This is only an aal1 token (password verified, MFA not yet) — hold
+        // it in memory so completeMfaChallenge() below has something to call
+        // back with. Not persisted to prefs and isAal2Verified stays false,
+        // so a kill mid-MFA doesn't leave a stale "logged in" session behind;
+        // saveSession() replaces this with the real aal2 session once the
+        // challenge is verified.
+        currentSession = UserSession(
+            accessToken = token,
+            refreshToken = authResp.refreshToken.orEmpty(),
+            userId = userId,
+            email = userEmail,
+            isAal2Verified = false
+        )
+
         // Mandatory MFA check
         val factorList = client.listFactors(token)
         val verifiedFactor = factorList.totp?.firstOrNull { it.status == "verified" }
