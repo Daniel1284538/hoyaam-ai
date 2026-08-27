@@ -1,0 +1,7 @@
+# This deployment is the static litigation-agent.html client only.
+# Keep the Supabase backend source and the Android client out of the
+# public static bundle — they aren't meant to be served by Vercel.
+android/
+supabase/
+CHANGELOG.md
+README.md
