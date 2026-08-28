@@ -315,6 +315,28 @@ data class CachedCaseAnalysis(
     val generatedAtEpochMs: Long
 )
 
+// ==================== MEMO WEB RESEARCH ====================
+// Supplementary, non-citable web context for a legal memo (see
+// litigation-memo-web-research) — never merged into the memo's own
+// content_text/draft_citations, which cite only the firm's verified
+// corpus. Cached client-side per draft_id, same "cache with a date,
+// reload manually" pattern as CachedCaseAnalysis.
+
+@JsonClass(generateAdapter = true)
+data class MemoWebResearchResponse(
+    @Json(name = "question") val question: String? = null,
+    @Json(name = "commentary") val commentary: String? = null,
+    @Json(name = "web_sources") val webSources: List<WebSourceDto> = emptyList(),
+    @Json(name = "web_search_queries") val webSearchQueries: List<String> = emptyList(),
+    @Json(name = "warnings") val warnings: List<String> = emptyList(),
+    @Json(name = "error") val error: String? = null
+)
+
+data class CachedMemoWebResearch(
+    val result: MemoWebResearchResponse,
+    val generatedAtEpochMs: Long
+)
+
 // ==================== RESEARCH ====================
 
 @JsonClass(generateAdapter = true)

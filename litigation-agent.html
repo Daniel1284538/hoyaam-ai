@@ -2354,7 +2354,7 @@ function renderDraftsPanel(matterId) {
     error = null; paint();
     const { data, error: err } = await sb
       .from('drafts')
-      .select('id, doc_type, version, status, storage_path, created_at')
+      .select('id, doc_type, version, status, storage_path, content_text, created_at')
       .eq('matter_id', matterId)
       .order('created_at', { ascending: false });
     if (err) { error = err.message; paint(); return; }
@@ -2377,11 +2377,15 @@ function renderDraftsPanel(matterId) {
     if (drafts === null) { panel.appendChild(h('p', { class: 'empty-note' }, 'جارٍ التحميل…')); return; }
     if (drafts.length === 0) { panel.appendChild(h('p', { class: 'empty-note' }, 'لا توجد مسودات أو مذكرات بعد.')); return; }
     panel.appendChild(h('div', { class: 'table-wrapper' }, h('table', { class: 'dense-table' }, [
-      h('thead', {}, h('tr', {}, ['النوع', 'النسخة', 'الحالة', 'التاريخ', '', ''].map((t) => h('th', {}, t)))),
+      h('thead', {}, h('tr', {}, ['النوع', 'النسخة', 'الحالة', 'التاريخ', '', '', ''].map((t) => h('th', {}, t)))),
       h('tbody', {}, drafts.map((d) => h('tr', {}, [
         h('td', {}, d.doc_type === 'legal_memo' ? [icon('research'), ' مذكرة قانونية'] : d.doc_type), h('td', {}, bdi(d.version)),
         h('td', {}, h('span', { class: `chip ${d.status === 'exported' ? 'chip-confirmed' : 'chip-provisional'}` }, d.status)),
         h('td', {}, bdi(fmtDate(d.created_at))),
+        h('td', {}, h('button', {
+          class: 'btn btn-outline btn-sm',
+          onclick: () => openDraftViewerDialog(d),
+        }, 'عرض')),
         h('td', {}, h('button', {
           class: 'btn btn-outline btn-sm',
           onclick: () => openCitationInspector(d.id, () => load()),
@@ -2400,6 +2404,68 @@ function renderDraftsPanel(matterId) {
   paint();
   load();
   return panel;
+}
+
+// Read-only viewer for a draft/memo's own content_text — there was no way
+// to read a memo in-app before this (only "inspect citations" and "export
+// to Word"). For doc_type='legal_memo' it also offers the supplementary
+// web-research panel: cached per draft_id (memoWebResearchCache), with a
+// generated-at timestamp and a manual re-run button, same pattern as
+// renderCaseAnalysisPanel. Never touches the memo's own text/citations.
+function openDraftViewerDialog(draft) {
+  const overlay = h('div', { class: 'modal-overlay', onclick: (e) => { if (e.target === overlay) overlay.remove(); } }, []);
+  document.body.appendChild(overlay);
+
+  const cached = memoWebResearchCache.get(draft.id);
+  let research = cached ? cached.result : null;
+  let researchGeneratedAt = cached ? cached.generatedAt : null;
+  let researchError = null, researchLoading = false;
+
+  function paint() {
+    clear(overlay);
+    const body = [
+      h('h2', {}, draft.doc_type === 'legal_memo' ? 'مذكرة قانونية' : draft.doc_type),
+      h('p', { class: 'form-hint' }, `نسخة ${draft.version} — ${fmtDate(draft.created_at)}`),
+      h('div', { class: 'ai-summary-box' }, h('div', { class: 'ai-summary-content' }, draft.content_text || '(لا يوجد نص)')),
+    ];
+
+    if (draft.doc_type === 'legal_memo') {
+      body.push(h('div', { class: 'panel-head', style: 'margin-block-start:16px' }, [
+        h('div', { class: 'panel-title' }, 'بحث ويب تكميلي (اختياري، غير مُستشهد به)'),
+        h('button', {
+          class: 'btn btn-outline btn-sm', disabled: researchLoading ? 'true' : null,
+          onclick: async () => {
+            researchError = null; researchLoading = true; paint();
+            try {
+              research = await callFunction('litigation-memo-web-research', { draft_id: draft.id });
+              researchGeneratedAt = new Date();
+              memoWebResearchCache.set(draft.id, { result: research, generatedAt: researchGeneratedAt });
+            } catch (e) { researchError = e.message; }
+            researchLoading = false; paint();
+          },
+        }, researchLoading ? 'جارٍ البحث…' : (research ? 'إعادة البحث' : 'بحث')),
+      ]));
+      if (researchError) body.push(h('div', { class: 'form-error' }, researchError));
+      if (research?.error) body.push(h('div', { class: 'form-error' }, research.error));
+      if (research?.warnings?.length) body.push(...research.warnings.map((w) =>
+        h('div', { class: 'form-error', style: 'background:rgba(217,114,10,.08); color:var(--warn); border-color:rgba(217,114,10,.3)' }, w)));
+      if (research?.commentary) {
+        body.push(h('div', { class: 'ai-summary-box' }, [
+          researchGeneratedAt ? h('div', { class: 'form-hint', style: 'margin-bottom:8px' }, ['تم البحث في: ', bdi(fmtDateTime(researchGeneratedAt))]) : null,
+          h('div', { class: 'ai-summary-content' }, research.commentary),
+          (research.web_sources || []).length > 0
+            ? h('ul', { style: 'margin:10px 0 0; padding-inline-start:20px' },
+                research.web_sources.map((s) => h('li', { class: 'form-hint' }, [h('a', { href: s.uri, target: '_blank', rel: 'noopener noreferrer' }, s.title || s.uri)])))
+            : null,
+        ]));
+      }
+    }
+
+    body.push(h('div', { class: 'page-header', style: 'margin:0; margin-block-start:16px' },
+      h('button', { class: 'btn btn-outline', onclick: () => overlay.remove() }, 'إغلاق')));
+    overlay.appendChild(h('div', { class: 'modal-card', style: 'max-width:720px' }, body));
+  }
+  paint();
 }
 
 // ---------- citation & provision inspector ----------
@@ -2792,6 +2858,15 @@ async function openFillTemplateDialog(matterId, onDone) {
 // instead of hidden — a two-day-old analysis reads as exactly that, not
 // as if it just ran.
 const caseAnalysisCache = new Map(); // matterId -> { result, generatedAt: Date }
+
+// Supplementary, non-citable web context for a legal memo's own question
+// — see litigation-memo-web-research's own header for why this is a
+// deliberately separate call from litigation-memo itself. Never merged
+// into a memo's content_text/draft_citations, which cite only the firm's
+// verified corpus. Same cache-with-a-date, reload-manually pattern as
+// caseAnalysisCache above, keyed per draft (a matter can have several
+// memos).
+const memoWebResearchCache = new Map(); // draftId -> { result, generatedAt: Date }
 
 function renderCaseAnalysisPanel(matterId, matter) {
   const cached = caseAnalysisCache.get(matterId);

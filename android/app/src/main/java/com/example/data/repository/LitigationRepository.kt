@@ -55,6 +55,13 @@ class LitigationRepository(
     // In-memory cache for AI case analysis per matter_id
     private val caseAnalysisCache = ConcurrentHashMap<String, CachedCaseAnalysis>()
 
+    // Per-draft (not per-matter — a matter can have several memos) cache
+    // for a legal memo's supplementary web research. A full map, not a
+    // single value, since more than one memo card can be visible on the
+    // Drafts tab at once.
+    private val _memoWebResearch = MutableStateFlow<Map<String, CachedMemoWebResearch>>(emptyMap())
+    val memoWebResearch: StateFlow<Map<String, CachedMemoWebResearch>> = _memoWebResearch.asStateFlow()
+
     // Current active session
     var currentSession: UserSession? = null
         private set
@@ -980,6 +987,33 @@ class LitigationRepository(
     // matter's entry up (or clear it) whenever the selected matter changes.
     fun syncCachedAnalysisFor(matterId: String) {
         _cachedCaseAnalysis.value = caseAnalysisCache[matterId]
+    }
+
+    // ==================== MEMO WEB RESEARCH ====================
+    // Supplementary, non-citable web context for a legal memo — see
+    // litigation-memo-web-research's own header for why this is a
+    // deliberately separate call from litigation-memo itself, never
+    // touching the memo's own content_text/draft_citations. Not
+    // persisted server-side (the live web changes over time), so this
+    // caches the result client-side per draft_id with a timestamp,
+    // exactly like case analysis: reopening a matter shows what was
+    // already generated, and there's a manual "regenerate" action for
+    // when the lawyer wants a fresh pass.
+    suspend fun generateMemoWebResearch(draftId: String): MemoWebResearchResponse {
+        val token = requireToken()
+        val json = JSONObject().apply {
+            put("draft_id", draftId)
+        }.toString()
+
+        val response = client.callEdgeFunction("litigation-memo-web-research", json, token)
+        val result = moshi.adapter(MemoWebResearchResponse::class.java).fromJson(response)
+            ?: MemoWebResearchResponse(error = "تعذّر معالجة رد البحث")
+
+        if (result.error == null) {
+            val cached = CachedMemoWebResearch(result, System.currentTimeMillis())
+            _memoWebResearch.value = _memoWebResearch.value + (draftId to cached)
+        }
+        return result
     }
 
     // ==================== HEARING BRIEFING ====================

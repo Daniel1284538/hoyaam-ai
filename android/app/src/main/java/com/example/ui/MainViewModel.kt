@@ -139,6 +139,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isAnalyzing = MutableStateFlow(false)
     val isAnalyzing: StateFlow<Boolean> = _isAnalyzing.asStateFlow()
 
+    val memoWebResearch: StateFlow<Map<String, CachedMemoWebResearch>> = repository.memoWebResearch
+    private val _generatingMemoWebResearchFor = MutableStateFlow<Set<String>>(emptySet())
+    val generatingMemoWebResearchFor: StateFlow<Set<String>> = _generatingMemoWebResearchFor.asStateFlow()
+
     private val _isGeneratingChronology = MutableStateFlow(false)
     val isGeneratingChronology: StateFlow<Boolean> = _isGeneratingChronology.asStateFlow()
 
@@ -726,6 +730,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 emitError(e, "تعذّر تحليل القضية")
             } finally {
                 _isAnalyzing.value = false
+            }
+        }
+    }
+
+    fun generateMemoWebResearch(draftId: String) {
+        viewModelScope.launch {
+            try {
+                _generatingMemoWebResearchFor.value = _generatingMemoWebResearchFor.value + draftId
+                val result = repository.generateMemoWebResearch(draftId)
+                if (result.error != null) emitError(IllegalStateException(result.error), "تعذّر جلب البحث الخارجي")
+            } catch (e: Exception) {
+                emitError(e, "تعذّر جلب البحث الخارجي")
+            } finally {
+                _generatingMemoWebResearchFor.value = _generatingMemoWebResearchFor.value - draftId
             }
         }
     }

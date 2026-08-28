@@ -450,6 +450,8 @@ fun MainAppContent(viewModel: MainViewModel) {
                     val isGeneratingBriefing by viewModel.isGeneratingBriefing.collectAsStateWithLifecycle()
                     val isCheckingConflicts by viewModel.isCheckingConflicts.collectAsStateWithLifecycle()
                     val conflictCheckResult by viewModel.conflictCheckResult.collectAsStateWithLifecycle()
+                    val memoWebResearch by viewModel.memoWebResearch.collectAsStateWithLifecycle()
+                    val generatingMemoWebResearchFor by viewModel.generatingMemoWebResearchFor.collectAsStateWithLifecycle()
 
                     LaunchedEffect(matterId) {
                         viewModel.loadMatter(matterId)
@@ -544,7 +546,10 @@ fun MainAppContent(viewModel: MainViewModel) {
                             isCheckingConflicts = isCheckingConflicts,
                             conflictCheckResult = conflictCheckResult,
                             onCheckConflicts = { names -> viewModel.checkConflicts(names, excludeMatterId = matterId) },
-                            onClearConflictCheckResult = { viewModel.clearConflictCheckResult() }
+                            onClearConflictCheckResult = { viewModel.clearConflictCheckResult() },
+                            memoWebResearch = memoWebResearch,
+                            generatingMemoWebResearchFor = generatingMemoWebResearchFor,
+                            onGenerateMemoWebResearch = { draftId -> viewModel.generateMemoWebResearch(draftId) }
                         )
                     } else {
                         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

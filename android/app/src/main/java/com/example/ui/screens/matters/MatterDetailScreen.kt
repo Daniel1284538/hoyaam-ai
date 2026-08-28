@@ -107,7 +107,12 @@ fun MatterDetailScreen(
     isCheckingConflicts: Boolean = false,
     conflictCheckResult: ConflictCheckResponse? = null,
     onCheckConflicts: (List<String>) -> Unit = {},
-    onClearConflictCheckResult: () -> Unit = {}
+    onClearConflictCheckResult: () -> Unit = {},
+    // litigation-memo-web-research — supplementary, non-citable web
+    // context for a legal memo, cached per draft_id.
+    memoWebResearch: Map<String, CachedMemoWebResearch> = emptyMap(),
+    generatingMemoWebResearchFor: Set<String> = emptySet(),
+    onGenerateMemoWebResearch: (draftId: String) -> Unit = {}
 ) {
     val colors = LocalHoyaamColors.current
     val context = LocalContext.current
@@ -413,7 +418,10 @@ fun MatterDetailScreen(
                         onInspectCitationsClick = onInspectCitationsClick,
                         onExportDraftClick = onExportDraftClick,
                         isGeneratingBriefing = isGeneratingBriefing,
-                        onGenerateBriefingClick = onGenerateBriefingClick
+                        onGenerateBriefingClick = onGenerateBriefingClick,
+                        memoWebResearch = memoWebResearch,
+                        generatingMemoWebResearchFor = generatingMemoWebResearchFor,
+                        onGenerateMemoWebResearch = onGenerateMemoWebResearch
                     )
                 }
 
@@ -1533,7 +1541,10 @@ fun DraftsTabContent(
     onInspectCitationsClick: (DraftDto) -> Unit,
     onExportDraftClick: (String) -> Unit,
     isGeneratingBriefing: Boolean = false,
-    onGenerateBriefingClick: () -> Unit = {}
+    onGenerateBriefingClick: () -> Unit = {},
+    memoWebResearch: Map<String, CachedMemoWebResearch> = emptyMap(),
+    generatingMemoWebResearchFor: Set<String> = emptySet(),
+    onGenerateMemoWebResearch: (draftId: String) -> Unit = {}
 ) {
     val colors = LocalHoyaamColors.current
 
@@ -1661,6 +1672,79 @@ fun DraftsTabContent(
                                 lineHeight = 20.sp,
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
+                        }
+
+                        // Supplementary web research — memos only, since
+                        // this is a legal question with an issue to look
+                        // context up for; a plain draft has no equivalent.
+                        // Never a citation, never part of contentText — see
+                        // litigation-memo-web-research's own header.
+                        if (draft.docType == "legal_memo") {
+                            val cached = memoWebResearch[draft.id]
+                            val isGenerating = generatingMemoWebResearchFor.contains(draft.id)
+
+                            if (cached != null) {
+                                val research = cached.result
+                                val timeStr = SimpleDateFormat("HH:mm - yyyy/MM/dd", Locale.US).format(Date(cached.generatedAtEpochMs))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = colors.inset,
+                                    border = BorderStroke(1.dp, colors.border),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text("بحث ويب تكميلي", color = colors.text, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("تم البحث في: ", color = colors.textDim, fontSize = 11.sp)
+                                                BidiMonoText(text = timeStr, color = colors.text2, fontSize = 11.sp)
+                                            }
+                                        }
+                                        research.warnings.forEach { w ->
+                                            Text(w, color = colors.warn, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                                        }
+                                        if (!research.commentary.isNullOrEmpty()) {
+                                            Text(
+                                                text = research.commentary,
+                                                color = colors.text2,
+                                                fontSize = 12.sp,
+                                                lineHeight = 18.sp,
+                                                modifier = Modifier.padding(top = 6.dp)
+                                            )
+                                        }
+                                        if (research.webSources.isNotEmpty()) {
+                                            Text(
+                                                text = "المصادر: " + research.webSources.joinToString("، ") { it.title ?: it.uri.orEmpty() },
+                                                color = colors.textDim,
+                                                fontSize = 11.sp,
+                                                modifier = Modifier.padding(top = 6.dp)
+                                            )
+                                        }
+                                        TextButton(
+                                            onClick = { onGenerateMemoWebResearch(draft.id) },
+                                            enabled = !isGenerating,
+                                            modifier = Modifier.padding(top = 4.dp)
+                                        ) {
+                                            Text(if (isGenerating) "جارٍ البحث…" else "إعادة البحث", color = colors.accent, fontSize = 11.sp)
+                                        }
+                                    }
+                                }
+                            } else {
+                                TextButton(
+                                    onClick = { onGenerateMemoWebResearch(draft.id) },
+                                    enabled = !isGenerating,
+                                    modifier = Modifier.padding(bottom = 4.dp)
+                                ) {
+                                    Text(
+                                        if (isGenerating) "جارٍ البحث…" else "بحث ويب تكميلي (اختياري، غير مُستشهد به)",
+                                        color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
                         }
 
                         Row(
