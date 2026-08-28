@@ -758,6 +758,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    // Suspend, not fire-and-forget: NewMemoDialog needs the result back
+    // (created vs a "no matches" note vs an error) to decide whether to
+    // close itself or show the note inline, same as the web app's dialog.
+    suspend fun generateMemo(question: String, authorityTypes: List<String>?, verifiedOnly: Boolean): MemoGenerateResponse {
+        val matterId = _selectedMatterId.value ?: return MemoGenerateResponse(error = "لا توجد قضية محددة")
+        return try {
+            val result = repository.generateMemo(matterId, question, authorityTypes, verifiedOnly)
+            if (result.created) loadMatter(matterId)
+            result
+        } catch (e: Exception) {
+            MemoGenerateResponse(error = e.message ?: "تعذّر توليد المذكرة")
+        }
+    }
+
     fun fillTemplate(templateId: String, fieldValues: Map<String, String>) {
         val matterId = _selectedMatterId.value ?: return
         viewModelScope.launch {

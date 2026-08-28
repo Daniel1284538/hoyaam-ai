@@ -258,7 +258,7 @@ fun MainAppContent(viewModel: MainViewModel) {
     var showProposeDeadlineDialog by remember { mutableStateOf(false) }
     var showUploadDocsDialog by remember { mutableStateOf(false) }
     var showNewDraftDialog by remember { mutableStateOf(false) }
-    var isNewDraftMemo by remember { mutableStateOf(false) }
+    var showNewMemoDialog by remember { mutableStateOf(false) }
     var showFillTemplateDialog by remember { mutableStateOf(false) }
     var showCitationInspectorDialog by remember { mutableStateOf(false) }
     var inspectingDraft by remember { mutableStateOf<DraftDto?>(null) }
@@ -490,12 +490,10 @@ fun MainAppContent(viewModel: MainViewModel) {
                             onConfirmDeadlineClick = { deadlineId -> viewModel.confirmDeadline(deadlineId) },
                             onOpenDocument = { doc -> viewModel.openDocument(doc) },
                             onNewDraftClick = {
-                                isNewDraftMemo = false
                                 showNewDraftDialog = true
                             },
                             onNewMemoClick = {
-                                isNewDraftMemo = true
-                                showNewDraftDialog = true
+                                showNewMemoDialog = true
                             },
                             onFillTemplateClick = { showFillTemplateDialog = true },
                             onInspectCitationsClick = { draft ->
@@ -885,12 +883,21 @@ fun MainAppContent(viewModel: MainViewModel) {
         NewDraftDialog(
             matterId = currentSelectedMatter!!.id,
             authorities = authorities,
-            isMemo = isNewDraftMemo,
             onDismiss = { showNewDraftDialog = false },
             onSubmit = { docType, instructions, claims, authIds ->
                 showNewDraftDialog = false
                 viewModel.generateDraft(docType, instructions, claims, authIds)
             }
+        )
+    }
+
+    if (showNewMemoDialog && currentSelectedMatter != null) {
+        NewMemoDialog(
+            onDismiss = { showNewMemoDialog = false },
+            onGenerate = { question, authorityTypes, verifiedOnly ->
+                viewModel.generateMemo(question, authorityTypes, verifiedOnly)
+            },
+            onCreated = { showNewMemoDialog = false }
         )
     }
 

@@ -771,21 +771,24 @@ fun UploadDocsDialog(
     }
 }
 
-// ==================== 7. NEW DRAFT / LEGAL MEMO DIALOG ====================
+// ==================== 7. NEW DRAFT DIALOG ====================
+// "Legal Memo" used to be a mode of this same dialog (isMemo=true), just
+// swapping in a claims textarea and calling the same onSubmit as a plain
+// draft — meaning "Create Legal Memo" actually called litigation-draft,
+// never litigation-memo at all. Split out into NewMemoDialog below, which
+// calls the real function with the form it actually expects (a single
+// legal question, not a claims list). This dialog is drafts-only now.
 
 @Composable
 fun NewDraftDialog(
     matterId: String,
     authorities: List<AuthorityDto>,
-    isMemo: Boolean,
     onDismiss: () -> Unit,
     onSubmit: (docType: String, instructions: String, claims: List<String>, selectedAuthorityIds: List<String>) -> Unit
 ) {
     val colors = LocalHoyaamColors.current
-    var docType by remember { mutableStateOf(if (isMemo) "legal_memo" else "statement_of_claim") }
+    val docType = "statement_of_claim"
     var instructions by remember { mutableStateOf("") }
-    var claimsText by remember { mutableStateOf("") }
-    val selectedAuthorityIds = remember { mutableStateListOf<String>() }
 
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Surface(
@@ -796,48 +799,12 @@ fun NewDraftDialog(
         ) {
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
-                    text = if (isMemo) "صياغة مذكرة قانونية متكاملة (IRAC)" else "صياغة مسودة بالذكاء الاصطناعي",
+                    text = "صياغة مسودة بالذكاء الاصطناعي",
                     color = colors.text,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     fontFamily = AmiriFontFamily
                 )
-
-                if (isMemo) {
-                    OutlinedTextField(
-                        value = claimsText,
-                        onValueChange = { claimsText = it },
-                        label = { Text("الطلبات والدفوع القانونية (سطر لكل طلب) *") },
-                        placeholder = { Text("أولاً: بطلان إعلان صحيفة الدعوى\nثانياً: رفض الدعوى لانتفاء صفة المدعي") },
-                        minLines = 3,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    Text("المصادر القانونية المعتمدة للاستشهاد بها:", color = colors.textDim, fontSize = 12.sp)
-                    LazyColumn(modifier = Modifier.heightIn(max = 140.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        items(authorities) { auth ->
-                            val isSelected = selectedAuthorityIds.contains(auth.id)
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = if (isSelected) colors.accent.copy(alpha = 0.12f) else colors.inset,
-                                border = BorderStroke(1.dp, if (isSelected) colors.accent else colors.border),
-                                modifier = Modifier.fillMaxWidth().clickable {
-                                    if (isSelected) selectedAuthorityIds.remove(auth.id)
-                                    else selectedAuthorityIds.add(auth.id)
-                                }
-                            ) {
-                                Row(modifier = Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                    Checkbox(checked = isSelected, onCheckedChange = {
-                                        if (it) selectedAuthorityIds.add(auth.id)
-                                        else selectedAuthorityIds.remove(auth.id)
-                                    })
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("${auth.title} (${auth.citation})", color = colors.text, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                }
 
                 OutlinedTextField(
                     value = instructions,
@@ -852,13 +819,123 @@ fun NewDraftDialog(
                     TextButton(onClick = onDismiss) { Text("إلغاء", color = colors.textDim) }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            val claims = claimsText.lines().filter { it.isNotBlank() }
-                            onSubmit(docType, instructions, claims, selectedAuthorityIds.toList())
-                        },
+                        onClick = { onSubmit(docType, instructions, emptyList(), emptyList()) },
                         colors = ButtonDefaults.buttonColors(containerColor = colors.text)
                     ) {
                         Text("توليد المسودة")
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== 7B. NEW LEGAL MEMO DIALOG ====================
+// Matches the web app's openGenerateMemoDialog exactly: a single legal
+// question, optional authority-type filter, an optional "verified only"
+// toggle — litigation-memo builds the memo (Issue/Rule/Application/
+// Conclusion) from passages actually retrieved for that question, and
+// refuses to create anything if retrieval finds zero matches. onGenerate
+// is suspend so this dialog can show that "no matches" note inline
+// instead of closing, same as web.
+private val MEMO_AUTHORITY_TYPES = listOf(
+    "statute" to "تشريع",
+    "cassation_principle" to "مبدأ نقض",
+    "regulation" to "لائحة",
+    "fiqh_doctrine" to "فقه إسلامي"
+)
+
+@Composable
+fun NewMemoDialog(
+    onDismiss: () -> Unit,
+    onGenerate: suspend (question: String, authorityTypes: List<String>?, verifiedOnly: Boolean) -> MemoGenerateResponse,
+    onCreated: () -> Unit
+) {
+    val colors = LocalHoyaamColors.current
+    val scope = rememberCoroutineScope()
+    var question by remember { mutableStateOf("") }
+    val selectedTypes = remember { mutableStateListOf<String>() }
+    var verifiedOnly by remember { mutableStateOf(false) }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = { if (!loading) onDismiss() }) {
+        Surface(
+            shape = RoundedCornerShape(14.dp),
+            color = colors.card,
+            border = BorderStroke(1.dp, colors.border),
+            modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(8.dp)
+        ) {
+            Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("إنشاء مذكرة قانونية", color = colors.text, fontSize = 18.sp, fontWeight = FontWeight.Bold, fontFamily = AmiriFontFamily)
+                Text(
+                    "تُبنى المذكرة (المسألة / القاعدة / التطبيق / الخلاصة) فقط من مقاطع مسترجعة فعلياً من المصادر القانونية. إن لم توجد نتائج، لن تُنشأ أي مذكرة.",
+                    color = colors.textDim, fontSize = 12.sp
+                )
+                error?.let { Text(it, color = colors.danger, fontSize = 13.sp) }
+                note?.let {
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = colors.warn.copy(alpha = 0.1f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(it, color = colors.warn, fontSize = 12.sp, modifier = Modifier.padding(8.dp)) }
+                }
+
+                OutlinedTextField(
+                    value = question,
+                    onValueChange = { question = it },
+                    label = { Text("المسألة القانونية *") },
+                    placeholder = { Text("مثال: هل يجوز الطعن بالنقض في هذا الحكم بعد فوات الميعاد؟") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text("أنواع المصادر (اختياري — الكل افتراضياً):", color = colors.textDim, fontSize = 12.sp)
+                MEMO_AUTHORITY_TYPES.forEach { (key, label) ->
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth().clickable {
+                            if (selectedTypes.contains(key)) selectedTypes.remove(key) else selectedTypes.add(key)
+                        }
+                    ) {
+                        Checkbox(
+                            checked = selectedTypes.contains(key),
+                            onCheckedChange = { if (it) selectedTypes.add(key) else selectedTypes.remove(key) }
+                        )
+                        Text(label, color = colors.text, fontSize = 13.sp)
+                    }
+                }
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth().clickable { verifiedOnly = !verifiedOnly }
+                ) {
+                    Checkbox(checked = verifiedOnly, onCheckedChange = { verifiedOnly = it })
+                    Text("الاقتصار على المصادر الموثّقة فقط", color = colors.text, fontSize = 13.sp)
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = onDismiss, enabled = !loading) { Text("إلغاء", color = colors.textDim) }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = {
+                            if (question.isBlank()) { error = "المسألة القانونية مطلوبة"; return@Button }
+                            error = null; note = null; loading = true
+                            scope.launch {
+                                val result = onGenerate(question, selectedTypes.toList().ifEmpty { null }, verifiedOnly)
+                                loading = false
+                                if (result.created) {
+                                    onCreated()
+                                } else {
+                                    note = result.note ?: result.error ?: "لم يتم العثور على مصادر مطابقة — لم تُنشأ أي مذكرة."
+                                }
+                            }
+                        },
+                        enabled = !loading,
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.text)
+                    ) {
+                        Text(if (loading) "جارٍ البحث والتوليد…" else "توليد المذكرة")
                     }
                 }
             }

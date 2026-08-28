@@ -864,6 +864,35 @@ class LitigationRepository(
         return JSONObject(response).optString("draft_id", UUID.randomUUID().toString())
     }
 
+    // Real function: litigation-memo. Distinct from litigation-draft above
+    // on purpose — a memo answers a legal question as a structured
+    // analysis (Issue/Rule/Application/Conclusion) grounded ONLY in
+    // retrieved authorities, and refuses to even call the model if
+    // retrieval finds zero matches (no invented answer wearing a
+    // structured format). "Create Legal Memo" used to call generateDraft()
+    // above instead — same endpoint as a plain draft, with a claims list
+    // instead of a question, and no fabrication guard at all.
+    suspend fun generateMemo(
+        matterId: String,
+        question: String,
+        authorityTypes: List<String>?,
+        verifiedOnly: Boolean
+    ): MemoGenerateResponse {
+        val token = requireToken()
+        val json = JSONObject().apply {
+            put("matter_id", matterId)
+            put("question", question)
+            if (!authorityTypes.isNullOrEmpty()) put("authority_types", JSONArray(authorityTypes))
+            if (verifiedOnly) put("verified_only", true)
+        }.toString()
+
+        val response = client.callEdgeFunction("litigation-memo", json, token)
+        val result = moshi.adapter(MemoGenerateResponse::class.java).fromJson(response)
+            ?: MemoGenerateResponse(error = "تعذّر معالجة رد المذكرة")
+        if (result.created) refreshAll()
+        return result
+    }
+
     // Real function: litigation-export-draft. Generates a real .docx (not
     // PDF — Arabic bidi/letter-shaping requires Word's own text engine)
     // and returns a short-lived signed URL to it. Previously this was a

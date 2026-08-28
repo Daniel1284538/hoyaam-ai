@@ -285,6 +285,25 @@ data class CaseAnalysisResponse(
     @Json(name = "error") val error: String? = null
 )
 
+// Real function: litigation-memo. "Create Legal Memo" used to call
+// litigation-draft instead (the plain-draft pipeline, doc_type set to
+// "legal_memo" as if that were just another template) — a completely
+// different endpoint, with a claims-list form instead of a single legal
+// question, no fabrication guard (litigation-memo refuses to even call
+// the model on zero retrieval matches), and a content_text shape that
+// doesn't match what litigation-memo-web-research expects to parse back
+// out. This is the real one, matching the web app's memo dialog exactly.
+@JsonClass(generateAdapter = true)
+data class MemoGenerateResponse(
+    @Json(name = "created") val created: Boolean = false,
+    @Json(name = "draft_id") val draftId: String? = null,
+    @Json(name = "matches") val matches: List<AuthorityMatchDto> = emptyList(),
+    @Json(name = "citations_bound") val citationsBound: Int? = null,
+    @Json(name = "warnings") val warnings: List<String> = emptyList(),
+    @Json(name = "note") val note: String? = null,
+    @Json(name = "error") val error: String? = null
+)
+
 @JsonClass(generateAdapter = true)
 data class CaseContextDto(
     @Json(name = "pages_used") val pagesUsed: Int = 0,
