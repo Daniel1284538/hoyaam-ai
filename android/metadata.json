@@ -1,0 +1,7 @@
+{
+  "name": "Hoyaam AI",
+  "description": "Companion mobile app for Egyptian litigation platform (هويام المحامية)",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
